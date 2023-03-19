@@ -43,7 +43,8 @@ class ControlParams:
         self, 
         control_model, 
         hint_cond, 
-        text_conditioning, 
+        text_conditioning,
+        negative_conditioning, 
         guess_mode, 
         weight, 
         guidance_stopped,
@@ -56,6 +57,7 @@ class ControlParams:
         self.control_model = control_model
         self.hint_cond = hint_cond
         self.text_conditioning = text_conditioning
+        self.negative_conditioning = negative_conditioning 
         self.guess_mode = guess_mode
         self.weight = weight
         self.guidance_stopped = guidance_stopped
@@ -176,14 +178,16 @@ class UnetHook(nn.Module):
                     x_in = x[:, :4, ...]
                     require_inpaint_hijack = True
 
-                seperate_context = context
+                
                 # use the seperate text conditioning for controlNet
-                if param.text_conditioning is not None:
-                    conds_list, tensor = prompt_parser.reconstruct_multicond_batch(param.text_conditioning, outer.current_step)
-                    seperate_context = repeat(tensor.squeeze(0), 'h w -> c h w', c=len(timesteps))
+                unconditional_conditioning = prompt_parser.reconstruct_cond_batch(param.negative_conditioning, outer.current_step)    
+                conds_list, tensor = prompt_parser.reconstruct_multicond_batch(param.text_conditioning, outer.current_step)
+                separate_context = th.cat([unconditional_conditioning, tensor])
+
+                # print(separate_context.shape, context.shape)
 
                 assert param.hint_cond is not None, f"Controlnet is enabled but no input image is given"  
-                control = param.control_model(x=x_in, hint=param.hint_cond, timesteps=timesteps, context=seperate_context)
+                control = param.control_model(x=x_in, hint=param.hint_cond, timesteps=timesteps, context=separate_context)
                 control_scales = ([param.weight] * 13)
                 
                 if outer.lowvram:

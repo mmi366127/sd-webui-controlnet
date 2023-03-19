@@ -185,6 +185,9 @@ class Script(scripts.Script):
 
         with gr.Row():
             text_prompt = gr.Textbox(label='Prompt', type='text')
+        
+        with gr.Row():
+            negative_text_prompt = gr.Textbox(label='Negative prompt', type='text')
 
         ctrls += (enabled,)
         # infotext_fields.append((enabled, "ControlNet Enabled"))
@@ -381,7 +384,7 @@ class Script(scripts.Script):
         else:
             send_dimen_button.click(fn=send_dimensions, inputs=[input_image], outputs=[self.txt2img_w_slider, self.txt2img_h_slider])                                        
         
-        ctrls += (input_image, text_prompt, scribble_mode, resize_mode, rgbbgr_mode)
+        ctrls += (input_image, text_prompt, negative_text_prompt, scribble_mode, resize_mode, rgbbgr_mode)
         ctrls += (lowvram,)
         ctrls += (processor_res, threshold_a, threshold_b, guidance_start, guidance_end, guess_mode)
         self.register_modules(tabname, ctrls)
@@ -710,16 +713,17 @@ class Script(scripts.Script):
                 control = detected_map  
 
             # read the text prompt and create separate text condition for controlNet
-            if len(unit.text_prompt) > 0:
-                with devices.autocast():
-                    text_conditioning = prompt_parser.get_multicond_learned_conditioning(shared.sd_model, [unit.text_prompt], p.steps)
-            else:
-                text_conditioning = None
-
+            with devices.autocast():
+                text_conditioning = prompt_parser.get_multicond_learned_conditioning(shared.sd_model, [unit.text_prompt] * p.batch_size, p.steps)
+            
+            with devices.autocast():
+                negative_conditioning = prompt_parser.get_learned_conditioning(shared.sd_model, [unit.negative_prompt] * p.batch_size, p.steps)
+            
             forward_param = ControlParams(
                 control_model=model_net,
                 hint_cond=control,
                 text_conditioning=text_conditioning,
+                negative_conditioning=negative_conditioning,
                 guess_mode=unit.guess_mode,
                 weight=unit.weight,
                 guidance_stopped=False,
