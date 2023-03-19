@@ -1,13 +1,13 @@
 
 import torch
 import torch.nn as nn
-from modules import devices, lowvram, shared, scripts
+from modules import devices, lowvram, shared, scripts, prompt_parser
 
 cond_cast_unet = getattr(devices, 'cond_cast_unet', lambda x: x)
 
 from ldm.modules.diffusionmodules.util import timestep_embedding
 from ldm.modules.diffusionmodules.openaimodel import UNetModel
-
+from einops import repeat
 
 class TorchHijackForUnet:
     """
@@ -43,6 +43,7 @@ class ControlParams:
         self, 
         control_model, 
         hint_cond, 
+        text_conditioning, 
         guess_mode, 
         weight, 
         guidance_stopped,
@@ -54,6 +55,7 @@ class ControlParams:
     ):
         self.control_model = control_model
         self.hint_cond = hint_cond
+        self.text_conditioning = text_conditioning
         self.guess_mode = guess_mode
         self.weight = weight
         self.guidance_stopped = guidance_stopped
@@ -68,6 +70,7 @@ class UnetHook(nn.Module):
     def __init__(self, lowvram=False) -> None:
         super().__init__()
         self.lowvram = lowvram
+        self.current_step = 0
         self.batch_cond_available = True
         self.only_mid_control = shared.opts.data.get("control_net_only_mid_control", False)
         
@@ -120,7 +123,8 @@ class UnetHook(nn.Module):
             total_extra_cond = torch.zeros([0, context.shape[-1]]).to(devices.get_device_for("controlnet"))
             only_mid_control = outer.only_mid_control
             require_inpaint_hijack = False
-            
+            outer.current_step += 1
+
             # handle external cond first
             for param in outer.control_params:
                 if param.guidance_stopped or not param.is_extra_cond:
@@ -156,7 +160,7 @@ class UnetHook(nn.Module):
                     continue
                 if outer.lowvram:
                     param.control_model.to(devices.get_device_for("controlnet"))
-                    
+                
                 # hires stuffs
                 # note that this method may not works if hr_scale < 1.1
                 if abs(x.shape[-1] - param.hint_cond.shape[-1] // 8) > 8:
@@ -171,9 +175,15 @@ class UnetHook(nn.Module):
                     # inpaint_model: 4 data + 4 downscaled image + 1 mask
                     x_in = x[:, :4, ...]
                     require_inpaint_hijack = True
-                    
+
+                seperate_context = context
+                # use the seperate text conditioning for controlNet
+                if param.text_conditioning is not None:
+                    conds_list, tensor = prompt_parser.reconstruct_multicond_batch(param.text_conditioning, outer.current_step)
+                    seperate_context = repeat(tensor.squeeze(0), 'h w -> c h w', c=len(timesteps))
+
                 assert param.hint_cond is not None, f"Controlnet is enabled but no input image is given"  
-                control = param.control_model(x=x_in, hint=param.hint_cond, timesteps=timesteps, context=context)
+                control = param.control_model(x=x_in, hint=param.hint_cond, timesteps=timesteps, context=seperate_context)
                 control_scales = ([param.weight] * 13)
                 
                 if outer.lowvram:

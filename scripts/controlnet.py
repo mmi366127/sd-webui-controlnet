@@ -7,7 +7,7 @@ import importlib
 import torch
 
 import modules.scripts as scripts
-from modules import shared, devices, script_callbacks, processing, masking, images
+from modules import shared, devices, script_callbacks, processing, masking, images, prompt_parser
 import gradio as gr
 import numpy as np
 
@@ -182,6 +182,9 @@ class Script(scripts.Script):
             rgbbgr_mode = gr.Checkbox(label='RGB to BGR', value=default_unit.rgbbgr_mode)
             lowvram = gr.Checkbox(label='Low VRAM', value=default_unit.low_vram)
             guess_mode = gr.Checkbox(label='Guess Mode', value=default_unit.guess_mode)
+
+        with gr.Row():
+            text_prompt = gr.Textbox(label='Prompt', type='text')
 
         ctrls += (enabled,)
         # infotext_fields.append((enabled, "ControlNet Enabled"))
@@ -378,7 +381,7 @@ class Script(scripts.Script):
         else:
             send_dimen_button.click(fn=send_dimensions, inputs=[input_image], outputs=[self.txt2img_w_slider, self.txt2img_h_slider])                                        
         
-        ctrls += (input_image, scribble_mode, resize_mode, rgbbgr_mode)
+        ctrls += (input_image, text_prompt, scribble_mode, resize_mode, rgbbgr_mode)
         ctrls += (lowvram,)
         ctrls += (processor_res, threshold_a, threshold_b, guidance_start, guidance_end, guess_mode)
         self.register_modules(tabname, ctrls)
@@ -527,6 +530,7 @@ class Script(scripts.Script):
         unit.model = selector(p, "control_net_model", unit.model, idx)
         unit.weight = selector(p, "control_net_weight", unit.weight, idx)
         unit.image = selector(p, "control_net_image", unit.image, idx)
+        unit.text_prompt = selector(p, "control_net_text_prompt", unit.text_prompt, idx)
         unit.scribble_mode = selector(p, "control_net_scribble_mode", unit.invert_image, idx)
         unit.resize_mode = selector(p, "control_net_resize_mode", unit.resize_mode, idx)
         unit.rgbbgr_mode = selector(p, "control_net_rgbbgr_mode", unit.rgbbgr_mode, idx)
@@ -599,7 +603,7 @@ class Script(scripts.Script):
             unit = self.parse_remote_call(p, unit, idx)
             if not unit.enabled:
                 continue
-
+            
             enabled_units.append(unit)
             if len(params_group) != 1:
                 prefix = f"ControlNet-{idx}"
@@ -640,7 +644,7 @@ class Script(scripts.Script):
             if image is not None:
                 while len(image['mask'].shape) < 3:
                     image['mask'] = image['mask'][..., np.newaxis]
-
+            
             resize_mode = external_code.resize_mode_from_value(unit.resize_mode)
             invert_image = unit.invert_image
 
@@ -705,9 +709,17 @@ class Script(scripts.Script):
             else:
                 control = detected_map  
 
+            # read the text prompt and create separate text condition for controlNet
+            if len(unit.text_prompt) > 0:
+                with devices.autocast():
+                    text_conditioning = prompt_parser.get_multicond_learned_conditioning(shared.sd_model, [unit.text_prompt], p.steps)
+            else:
+                text_conditioning = None
+
             forward_param = ControlParams(
                 control_model=model_net,
                 hint_cond=control,
+                text_conditioning=text_conditioning,
                 guess_mode=unit.guess_mode,
                 weight=unit.weight,
                 guidance_stopped=False,

@@ -44,6 +44,7 @@ class ControlNetUnit:
         model: Optional[str]=None,
         weight: float=1.0,
         image: Optional[Union[Dict[str, Union[np.ndarray, str]], Tuple[Union[np.ndarray, str], Union[np.ndarray, str]], np.ndarray, str]]=None,
+        text_prompt: str="",
         invert_image: bool=False,
         resize_mode: Union[ResizeMode, int, str]=ResizeMode.INNER_FIT,
         rgbbgr_mode: bool=False,
@@ -60,6 +61,7 @@ class ControlNetUnit:
         self.model = model
         self.weight = weight
         self.image = image
+        self.text_prompt = text_prompt
         self.invert_image = invert_image
         self.resize_mode = resize_mode
         self.rgbbgr_mode = rgbbgr_mode
